@@ -1,4 +1,5 @@
 # dbi
+[![Go Reference](https://pkg.go.dev/badge/github.com/stianwa/dbi.svg)](https://pkg.go.dev/github.com/stianwa/dbi) [![Go Report Card](https://goreportcard.com/badge/github.com/stianwa/idbi)](https://goreportcard.com/report/github.com/stianwa/dbi)
 
 Package dbi implements a database/sql wrapper.
 
