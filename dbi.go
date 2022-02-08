@@ -8,15 +8,24 @@ import (
 	"strings"
 )
 
-// Config holds the configuration parameters and handler
+// Config holds the connection string parameters and handler
 type Config struct {
-	Name     string  `yaml:"name"     json:"name"`
-	User     string  `yaml:"user"     json:"user"`
-	Password string  `yaml:"password" json:"password"`
-	SSLMode  string  `yaml:"sslmode"  json:"sslmode"`
-	Driver   string  `yaml:"driver"   json:"driver"`
-	Host     string  `yaml:"host"     json:"host"`
-	db       *sql.DB `yaml:"-"        json:"-"`
+	// Database name
+	Name string `yaml:"name"     json:"name"`
+	// Database user name
+	User string `yaml:"user"     json:"user"`
+	// Database password can be one of:
+	// 1) password text
+	// 2) pointer to a file containing the password:       file:/path/to/secret.pw
+	// 3) an environment variable containing the password: env:PASSWORD_ENV
+	Password string `yaml:"password" json:"password"`
+	// SSLMode: disable,allow,prefer,require,verify-ca,verify-full. Default: disable
+	SSLMode string `yaml:"sslmode"  json:"sslmode"`
+	// Driver, only postgresql (the default) is tested.
+	Driver string `yaml:"driver"   json:"driver"`
+	// Hostname can be a hostname or a path to a socket. Defaults to /var/run/postgresql
+	Host string  `yaml:"host"     json:"host"`
+	db   *sql.DB `yaml:"-"        json:"-"`
 }
 
 // Open initialize a configuration. An error is returned if the
