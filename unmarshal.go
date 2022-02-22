@@ -1,6 +1,8 @@
 package dbi
 
 import (
+	"context"
+	"database/sql"
 	"fmt"
 	"reflect"
 	"strings"
@@ -19,7 +21,35 @@ type taggroup struct {
 // time and time zone. To get rid of this, the unmarshaler can strip
 // away the time part if the field type is a string and the option date
 // is specified after the column name. Example. `dbi:"date,date"`
-func (c *Config) Unmarshal(v interface{}, sql string, args ...interface{}) error {
+func (c *Config) Unmarshal(v interface{}, SQL string, args ...interface{}) error {
+	return c.unmarshal(nil, v, SQL, args...)
+}
+
+// UnmarshalReadOnly rows into a slice with pointers to a struct. The
+// mapping between row columns and struct fields are done with field
+// tags named dbi. When getting dates from the database, the pq
+// modules returnes a date format looking very much like a timestamp
+// including time and time zone. To get rid of this, the unmarshaler
+// can strip away the time part if the field type is a string and the
+// option date is specified after the column
+// name. Example. `dbi:"date,date"`
+func (c *Config) UnmarshalReadOnly(v interface{}, SQL string, args ...interface{}) error {
+	return c.unmarshal(&sql.TxOptions{ReadOnly: true}, v, SQL, args...)
+}
+
+// UnmarshalWithOptions rows into a slice with pointers to a struct. The
+// mapping between row columns and struct fields are done with field
+// tags named dbi. When getting dates from the database, the pq
+// modules returnes a date format looking very much like a timestamp
+// including time and time zone. To get rid of this, the unmarshaler
+// can strip away the time part if the field type is a string and the
+// option date is specified after the column
+// name. Example. `dbi:"date,date"`
+func (c *Config) UnmarshalWithOptions(txOpts *sql.TxOptions, v interface{}, SQL string, args ...interface{}) error {
+	return c.unmarshal(txOpts, v, SQL, args...)
+}
+
+func (c *Config) unmarshal(txOpts *sql.TxOptions, v interface{}, SQL string, args ...interface{}) error {
 	var targetSlice reflect.Value
 	var t reflect.Type
 
@@ -67,10 +97,10 @@ func (c *Config) Unmarshal(v interface{}, sql string, args ...interface{}) error
 
 	// Convert ? to $1 and $2 etc.
 	if c.Driver == "postgres" {
-		sql = postgresPlaceholders(sql)
+		SQL = postgresPlaceholders(SQL)
 	}
 
-	tx, err := c.db.Begin()
+	tx, err := c.db.BeginTx(context.Background(), txOpts)
 	if err != nil {
 		return fmt.Errorf("dbi: begin: %v", err)
 	}
@@ -89,7 +119,7 @@ func (c *Config) Unmarshal(v interface{}, sql string, args ...interface{}) error
 		}
 	}()
 
-	rows, err := tx.Query(sql, args...)
+	rows, err := tx.Query(SQL, args...)
 	if err != nil {
 		return fmt.Errorf("dbi: query: %v", err)
 	}
