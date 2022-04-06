@@ -24,8 +24,12 @@ type Config struct {
 	// Driver, only postgresql (the default) is tested.
 	Driver string `yaml:"driver"   json:"driver"`
 	// Hostname can be a hostname or a path to a socket. Defaults to /var/run/postgresql
-	Host string  `yaml:"host"     json:"host"`
-	db   *sql.DB `yaml:"-"        json:"-"`
+	Host string `yaml:"host"     json:"host"`
+	// Maximum open connections
+	MaxOpenConns int `yaml:"maxOpenConns"`
+	// Maximum idle connections
+	MaxIdleConns int     `yaml:"maxIdleConns"`
+	db           *sql.DB `yaml:"-"        json:"-"`
 }
 
 // Open initialize a configuration. An error is returned if the
@@ -67,6 +71,14 @@ func (c *Config) Open() error {
 
 	if err := c.db.Ping(); err != nil {
 		return err
+	}
+
+	if c.MaxOpenConns > 0 {
+		c.db.SetMaxOpenConns(c.MaxOpenConns)
+	}
+
+	if c.MaxIdleConns > 0 {
+		c.db.SetMaxIdleConns(c.MaxIdleConns)
 	}
 
 	return nil

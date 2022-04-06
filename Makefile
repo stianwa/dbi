@@ -15,4 +15,4 @@ lint:
 	@gocyclo -top 4 .
 	@gocyclo -over 50 .
 	@ineffassign .
-	@gofmt -d .
+	@gofmt -w .
