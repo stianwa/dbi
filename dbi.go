@@ -1,3 +1,4 @@
+// Package dbi provides library methods for a sql/pg wrapper.
 package dbi
 
 import (
@@ -25,6 +26,8 @@ type Config struct {
 	Driver string `yaml:"driver"   json:"driver"`
 	// Hostname can be a hostname or a path to a socket. Defaults to /var/run/postgresql
 	Host string `yaml:"host"     json:"host"`
+	// Hostname can be a hostname or a path to a socket. Defaults to /var/run/postgresql
+	Port int `yaml:"port"     json:"port"`
 	// Maximum open connections
 	MaxOpenConns int `yaml:"maxOpenConns"`
 	// Maximum idle connections
@@ -60,9 +63,13 @@ func (c *Config) Open() error {
 			password = "password=" + pw
 		}
 	}
+	port := ""
+	if c.Port != 0 {
+		port = fmt.Sprintf(" port=%d", c.Port)
+	}
 
-	dbstr := fmt.Sprintf("user=%s dbname=%s %s sslmode=%s host=%s",
-		c.User, c.Name, password, c.SSLMode, c.Host)
+	dbstr := fmt.Sprintf("user=%s dbname=%s %s sslmode=%s host=%s%s",
+		c.User, c.Name, password, c.SSLMode, c.Host, port)
 	db, err := sql.Open(c.Driver, dbstr)
 	if err != nil {
 		return err

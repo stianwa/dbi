@@ -141,8 +141,8 @@ func (c *Config) unmarshal(txOpts *sql.TxOptions, v interface{}, SQL string, arg
 	for rows.Next() {
 		columns := make([]interface{}, len(cols))
 		columnPointers := make([]interface{}, len(cols))
-		new := reflect.New(t)
-		newe := new.Elem()
+		n := reflect.New(t)
+		newe := n.Elem()
 		t = newe.Type()
 		var dateOptions []int
 		var aggOptions []int
@@ -198,7 +198,7 @@ func (c *Config) unmarshal(txOpts *sql.TxOptions, v interface{}, SQL string, arg
 			}
 		}
 
-		targetSlice.Set(reflect.Append(targetSlice, new))
+		targetSlice.Set(reflect.Append(targetSlice, n))
 	}
 
 	if err := rows.Err(); err != nil {
