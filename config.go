@@ -135,9 +135,10 @@ func (c *Config) dsn() (string, error) {
 		}
 		password = pw
 	}
+
 	port := ""
 	if c.Port != 0 {
-		port = fmt.Sprintf(":%d", c.Port)
+		port = ":" + strconv.Itoa(c.Port)
 	}
 
 	host  := c.Host + port
@@ -145,11 +146,16 @@ func (c *Config) dsn() (string, error) {
 		host = ""
 	}
 
+	user := url.User(c.User)
+	if password != "" {
+		user = url.UserPassword(c.User, password)
+	}
+
 	u := url.URL{
 		Scheme: c.Driver,
-		User:   url.UserPassword(c.User, password),
+		User:   user,
 		Host:   host,
-		Path:   c.Name,
+		Path:   "/" + c.Name,
 	}
 
 	q := u.Query()
