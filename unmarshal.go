@@ -1,209 +1,138 @@
 package dbi
 
 import (
-	"context"
-	"database/sql"
 	"fmt"
 	"reflect"
-	"strings"
 )
 
-type taggroup struct {
-	Field   string
-	Column  string
-	Options map[string]string
-}
-
-// Unmarshal rows into a slice with pointers to a struct. The mapping
-// between row columns and struct fields are done with field tags
-// named dbi. When getting dates from the database, the pq modules
-// returnes a date format looking very much like a timestamp including
-// time and time zone. To get rid of this, the unmarshaler can strip
-// away the time part if the field type is a string and the option date
-// is specified after the column name. Example. `dbi:"date,date"`
-func (c *Config) Unmarshal(v interface{}, SQL string, args ...interface{}) error {
-	return c.unmarshal(nil, v, SQL, args...)
-}
-
-// UnmarshalReadOnly rows into a slice with pointers to a struct. The
-// mapping between row columns and struct fields are done with field
-// tags named dbi. When getting dates from the database, the pq
-// modules returnes a date format looking very much like a timestamp
-// including time and time zone. To get rid of this, the unmarshaler
-// can strip away the time part if the field type is a string and the
-// option date is specified after the column
-// name. Example. `dbi:"date,date"`
-func (c *Config) UnmarshalReadOnly(v interface{}, SQL string, args ...interface{}) error {
-	return c.unmarshal(&sql.TxOptions{ReadOnly: true}, v, SQL, args...)
-}
-
-// UnmarshalWithOptions rows into a slice with pointers to a struct. The
-// mapping between row columns and struct fields are done with field
-// tags named dbi. When getting dates from the database, the pq
-// modules returnes a date format looking very much like a timestamp
-// including time and time zone. To get rid of this, the unmarshaler
-// can strip away the time part if the field type is a string and the
-// option date is specified after the column
-// name. Example. `dbi:"date,date"`
-func (c *Config) UnmarshalWithOptions(txOpts *sql.TxOptions, v interface{}, SQL string, args ...interface{}) error {
-	return c.unmarshal(txOpts, v, SQL, args...)
-}
-
-func (c *Config) unmarshal(txOpts *sql.TxOptions, v interface{}, SQL string, args ...interface{}) error {
-	var targetSlice reflect.Value
-	var t reflect.Type
-
-	// Verify the pointer to a splice of struct pointers
-	if reflect.TypeOf(v).Kind() == reflect.Ptr &&
-		reflect.TypeOf(v).Elem().Kind() == reflect.Slice &&
-		reflect.TypeOf(v).Elem().Elem().Kind() == reflect.Ptr &&
-		reflect.TypeOf(v).Elem().Elem().Elem().Kind() == reflect.Struct {
-		targetSlice = reflect.ValueOf(v).Elem()
-		t = reflect.TypeOf(v).Elem().Elem().Elem()
-	} else {
-		return fmt.Errorf("dbi: argument must be a ponter to a slice with pointers to a struct")
+// Unmarshal executes query within a transaction and scans all rows into v.
+//
+// v must be a pointer to a slice of pointers to structs. Each row is mapped
+// to a new struct instance based on column names and struct metadata.
+//
+// If configured, SET LOCAL statements are applied before executing the query.
+// On success, the transaction is committed; otherwise it is rolled back.
+//
+// For PostgreSQL, '?' placeholders are rewritten to $1, $2, ... before execution.
+//
+// # An error is returned if validation, query execution, scanning, or commit fails
+//
+// The `dbi` tag defines how a struct field maps to a query column and how
+// the scanned value is processed.
+//
+// The tag format is:
+//
+//	`dbi:"column[,option[,option...]]"`
+//
+// The first value specifies the column name expected in the query result.
+// Fields without a `dbi` tag are ignored.
+//
+// All tagged columns must be present in the query result. If a column defined
+// in a tag is missing, Unmarshal returns an error.
+//
+// Supported options:
+//
+//   - date
+//     If the field is of type string, the scanned value is truncated to its
+//     first 10 characters after assignment. No effect on non-string fields.
+//
+//   - zeronull
+//     The column is scanned into an intermediate value. If the database value
+//     is NULL, the field is set to its zero value. Otherwise, the value is
+//     assigned using the package's conversion logic (assignRawToField).
+//     This option must not be used on pointer fields.
+//
+// Notes:
+//
+//   - Fields with zeronull are always scanned via an intermediate value.
+//   - Other fields are scanned directly into the struct field when possible.
+//   - If a field implements sql.Scanner, it is used during assignment when
+//     scanning via intermediate values.
+//   - Basic type conversions are attempted for numeric, []byte, and time.Time values.
+//
+// Example:
+//
+//	type row struct {
+//	    ID        int       `dbi:"id"`
+//	    Name      string    `dbi:"name"`
+//	    CreatedAt string    `dbi:"created_at,date"`
+//	    Count     int       `dbi:"count,zeronull"`
+//	}
+func (q *Query) Unmarshal(v any, query string, args ...any) (err error) {
+	targetSlice, structType, err := validateTargetSlice(v)
+	if err != nil {
+		return err
 	}
 
-	// Check that we can write to the slice
-	if !targetSlice.CanSet() {
-		return fmt.Errorf("dbi: unable to set/change slice")
+	meta, err := getStructMetadata(structType)
+	if err != nil {
+		return err
 	}
 
-	// Collect the fields/columns we are going to populate
-	populate := make(map[string]taggroup)
-	for i := 0; i < t.NumField(); i++ {
-		f := t.Field(i)
-		if f.Tag == "" {
-			continue
+	if q.driver == "postgres" {
+		query = postgresPlaceholders(query)
+	}
+
+	tx, err := q.db.BeginTx(q.ctx, q.txOptions)
+	if err != nil {
+		return fmt.Errorf("begin: %w", err)
+	}
+
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
 		}
-		if tag, ok := f.Tag.Lookup("dbi"); ok {
-			// Column and options are separted with commas. First "option" is the column name
-			options := strings.Split(tag, ",")
-			if len(options) > 0 && options[0] != "" {
-				tag := taggroup{Field: f.Name,
-					Column:  options[0],
-					Options: make(map[string]string)}
-				for _, option := range options[1:] {
-					tag.Options[option] = ""
-				}
+		if q.cancel != nil {
+			q.cancel()
+		}
+	}()
 
-				if _, ok := populate[tag.Column]; ok {
-					return fmt.Errorf("dbi: column %s used on multiple fields", tag.Column)
-				}
-				populate[tag.Column] = tag
+	if q.setLocal != nil {
+		for _, s := range q.setLocal.queries() {
+			_, err := tx.Exec(s.SQL, s.Value)
+			if err != nil {
+				return err
 			}
 		}
 	}
 
-	// Convert ? to $1 and $2 etc.
-	if c.Driver == "postgres" {
-		SQL = postgresPlaceholders(SQL)
-	}
-
-	tx, err := c.db.BeginTx(context.Background(), txOpts)
+	rows, err := tx.QueryContext(q.ctx, query, args...)
 	if err != nil {
-		return fmt.Errorf("dbi: begin: %v", err)
-	}
-
-	defer func() {
-		if p := recover(); p != nil {
-			// a panic occurred, rollback and repanic
-			tx.Rollback()
-			panic(p)
-		} else if err != nil {
-			// something went wrong, rollback
-			tx.Rollback()
-		} else {
-			// all good, commit
-			err = tx.Commit()
-		}
-	}()
-
-	rows, err := tx.Query(SQL, args...)
-	if err != nil {
-		return fmt.Errorf("dbi: query: %v", err)
+		return wrapQueryErr(q.ctx, err, "query")
 	}
 
 	defer rows.Close()
 
-	cols, _ := rows.Columns()
-
-	colCheck := make(map[string]bool)
-	for _, c := range cols {
-		colCheck[c] = true
+	cols, err := rows.Columns()
+	if err != nil {
+		return fmt.Errorf("columns: %w", err)
 	}
-	for c := range populate {
-		if _, ok := colCheck[c]; !ok {
-			return fmt.Errorf("dbi: query didn't return any columns with name %s", c)
-		}
+
+	colBindings, err := buildColumnBindings(cols, meta)
+	if err != nil {
+		return err
 	}
 
 	for rows.Next() {
-		columns := make([]interface{}, len(cols))
-		columnPointers := make([]interface{}, len(cols))
-		n := reflect.New(t)
-		newe := n.Elem()
-		t = newe.Type()
-		var dateOptions []int
-		var aggOptions []int
-	colLoop:
-		for i := range columns {
-			if p, ok := populate[cols[i]]; ok {
-				for j := 0; j < t.NumField(); j++ {
-					if t.Field(j).Name == p.Field &&
-						newe.Field(j).CanSet() &&
-						newe.Field(j).CanAddr() {
-						addr := newe.Field(j).Addr()
-						if addr.CanInterface() {
-							columnPointers[i] = addr.Interface()
-							if len(p.Options) > 0 {
-								if _, ok := p.Options["agg"]; ok {
-									columnPointers[i] = &columns[i]
-									aggOptions = append(aggOptions, j)
-								}
-								if _, ok := p.Options["date"]; ok && t.Field(j).Type.Name() == "string" {
-									dateOptions = append(dateOptions, j)
-								}
-							}
+		n := reflect.New(structType)
+		elem := n.Elem()
 
-							continue colLoop
-						}
-					}
-				}
-			}
-			// Discard column
-			columnPointers[i] = &columns[i]
-		}
-
-		// Scan the result into the column pointers...
-		if err := rows.Scan(columnPointers...); err != nil {
-			return fmt.Errorf("dbi: row scan: %v", err)
-		}
-
-		for _, i := range dateOptions {
-			if newe.Field(i).CanSet() {
-				str := newe.Field(i).String()
-				if len(str) > 10 {
-					newe.Field(i).Set(reflect.ValueOf(str[0:10]))
-				}
-			}
-		}
-
-		for _, i := range aggOptions {
-			if newe.Field(i).CanSet() {
-				str := newe.Field(i).String()
-				if len(str) > 10 {
-					newe.Field(i).Set(reflect.ValueOf(str[0:10]))
-				}
-			}
+		if err := scanOneRow(rows, elem, colBindings); err != nil {
+			return err
 		}
 
 		targetSlice.Set(reflect.Append(targetSlice, n))
 	}
 
 	if err := rows.Err(); err != nil {
-		return fmt.Errorf("dbi: rows: %v", err)
+		return fmt.Errorf("rows: %w", err)
 	}
 
-	return err
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit: %w", err)
+	}
+
+	committed = true
+	return nil
 }

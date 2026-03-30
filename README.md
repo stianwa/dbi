@@ -42,7 +42,8 @@ func main() {
        }
 
        var rows []*SomeData
-       if err := db.Unmarshal(&rows, "select from somedata where age = ?", 21); err != nil {
+	   q := dbi.NewQuery()
+       if err := q.Unmarshal(&rows, "select * from somedata where age = ?", 21); err != nil {
           fmt.Printf("%v\n", err)
           return
        }
@@ -61,4 +62,4 @@ The dbi module is experimental and under development. Do not use for production.
 License
 -------
 
-GPLv3, see [LICENSE.md](LICENSE.md)
+MIT, see [LICENSE.md](LICENSE.md)
