@@ -140,15 +140,26 @@ func (c *Config) dsn() (string, error) {
 		port = fmt.Sprintf(":%d", c.Port)
 	}
 
+	host  := c.Host + port
+	if strings.HasPrefix(host, "/") {
+		host = ""
+	}
+
 	u := url.URL{
 		Scheme: c.Driver,
 		User:   url.UserPassword(c.User, password),
-		Host:   c.Host + port,
+		Host:   host,
 		Path:   c.Name,
 	}
 
 	q := u.Query()
+
 	q.Set("sslmode", c.SSLMode)
+
+	if host == "" {
+		q.Set("host", c.Host)
+	}
+
 	if c.ApplicationName != "" {
 		q.Set("application_name", c.ApplicationName)
 	}
