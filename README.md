@@ -20,11 +20,12 @@ Examples
 ```go
 
 package main
- 
+
 import (
        "github.com/stianwa/dbi"
      _ "github.com/lib/pq"
        "fmt"
+	   "time"
 )
 
 type SomeData struct {
@@ -40,10 +41,14 @@ func main() {
           fmt.Printf("%v\n", err)
           return
        }
+	   defer db.Close()
 
        var rows []*SomeData
-	   q := dbi.NewQuery()
-       if err := q.Unmarshal(&rows, "select * from somedata where age = ?", 21); err != nil {
+
+	   q := db.NewQueryOptions(dbi.WithTimeout(5 * time.Second))
+	   defer q.Cancel()
+
+       if err := q.Unmarshal(&rows, "select * from some_table where age = ?", 21); err != nil {
           fmt.Printf("%v\n", err)
           return
        }

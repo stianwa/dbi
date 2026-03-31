@@ -68,12 +68,16 @@ type Config struct {
 // Open initialize a configuration. An error is returned if the
 // initializing failed.
 func (c *Config) Open() error {
+	if c.db != nil {
+		return errors.New("db already open")
+	}
+
 	if c.User == "" {
-		return fmt.Errorf("db user missing")
+		return errors.New("db user missing")
 	}
 
 	if c.Name == "" {
-		return fmt.Errorf("db name missing")
+		return errors.New("db name missing")
 	}
 
 	if c.Driver == "" {
@@ -97,22 +101,10 @@ func (c *Config) Open() error {
 	}
 	c.db = db
 
-	timeout := c.DefaultQueryTimeout
-	if timeout == 0 {
-		timeout = 5 * time.Second
-	}
+	if err := c.Ping(); err != nil {
+		_ = c.Close()
 
-	ctx, cancel := context.WithTimeoutCause(context.Background(),
-		timeout,
-		fmt.Errorf("timed out after %s", timeout))
-	defer cancel()
-
-	if err := c.db.PingContext(ctx); err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			return fmt.Errorf("db ping: %w", context.Cause(ctx))
-		}
-
-		return fmt.Errorf("db ping: %w", err)
+		return err
 	}
 
 	if c.MaxOpenConns > 0 {
@@ -141,7 +133,7 @@ func (c *Config) dsn() (string, error) {
 		port = ":" + strconv.Itoa(c.Port)
 	}
 
-	host  := c.Host + port
+	host := c.Host + port
 	if strings.HasPrefix(host, "/") {
 		host = ""
 	}
@@ -213,12 +205,38 @@ func (c *Config) dsn() (string, error) {
 
 // Close the handler. Return error upon errors.
 func (c *Config) Close() error {
-	return c.db.Close()
+	if c.db == nil {
+		return errors.New("db not open")
+	}
+
+	ret := c.db.Close()
+
+	c.db = nil
+
+	return ret
 }
 
 // Ping the database. Return error upon errors.
 func (c *Config) Ping() error {
-	return c.db.Ping()
+	timeout := c.DefaultQueryTimeout
+	if timeout == 0 {
+		timeout = 5 * time.Second
+	}
+
+	ctx, cancel := context.WithTimeoutCause(context.Background(),
+		timeout,
+		fmt.Errorf("timed out after %s", timeout))
+	defer cancel()
+
+	if err := c.db.PingContext(ctx); err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return fmt.Errorf("db ping: %w", context.Cause(ctx))
+		}
+
+		return fmt.Errorf("db ping: %w", err)
+	}
+
+	return nil
 }
 
 // PrepareTest test a sql, and returns an error if it fails.

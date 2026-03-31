@@ -58,7 +58,7 @@ import (
 //	    CreatedAt string    `dbi:"created_at,date"`
 //	    Count     int       `dbi:"count,zeronull"`
 //	}
-func (q *Query) Unmarshal(v any, query string, args ...any) (err error) {
+func (q *QueryOptions) Unmarshal(v any, query string, args ...any) (err error) {
 	targetSlice, structType, err := validateTargetSlice(v)
 	if err != nil {
 		return err
@@ -88,8 +88,8 @@ func (q *Query) Unmarshal(v any, query string, args ...any) (err error) {
 		}
 	}()
 
-	if q.setLocal != nil {
-		for _, s := range q.setLocal.queries() {
+	if q.setConfig != nil {
+		for _, s := range q.setConfig.queries() {
 			_, err := tx.Exec(s.SQL, s.Value)
 			if err != nil {
 				return err

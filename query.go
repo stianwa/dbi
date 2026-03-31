@@ -5,34 +5,34 @@ import (
 	"time"
 )
 
-// QueryAny executes query and returns its rows as a slice of column-value maps.
-func (q *Query) QueryAny(query string, args ...any) ([]map[string]any, error) {
-	rows, err := q.MultiQuery([]string{query}, args)
+// Query executes query and returns its rows as a slice of column-value maps.
+func (q *QueryOptions) Query(query string, args ...any) ([]map[string]any, error) {
+	rowsets, err := q.MultiQuery([]string{query}, args)
 	if err != nil {
 		return nil, err
 	}
 
-	if len(rows) != 1 {
-		return nil, fmt.Errorf("query returned %d rows, expected 1", len(rows))
+	if len(rowsets) != 1 {
+		return nil, fmt.Errorf("query returned %d rows, expected 1", len(rowsets))
 	}
 
-	return rows[0], nil
+	return rowsets[0], nil
 }
 
 // QueryString executes query and returns its rows as a slice of column-value
 // maps with stringified values.
-func (q *Query) QueryString(query string, args ...any) ([]map[string]string, error) {
-	rows, err := q.MultiQuery([]string{query}, args)
+func (q *QueryOptions) QueryString(query string, args ...any) ([]map[string]string, error) {
+	rowsets, err := q.MultiQuery([]string{query}, args)
 	if err != nil {
 		return nil, err
 	}
 
-	if len(rows) != 1 {
-		return nil, fmt.Errorf("query returned %d rows, expected 1", len(rows))
+	if len(rowsets) != 1 {
+		return nil, fmt.Errorf("query returned %d rows, expected 1", len(rowsets))
 	}
 
 	var n []map[string]string
-	for _, row := range rows[0] {
+	for _, row := range rowsets[0] {
 		l := make(map[string]string)
 		for k, v := range row {
 			str := ""
@@ -74,7 +74,7 @@ func (q *Query) QueryString(query string, args ...any) ([]map[string]string, err
 // All queries are executed in a single transaction. If fewer argument lists
 // than queries are provided, the remaining queries are executed with no
 // arguments.
-func (q *Query) MultiQuery(queries []string, argsList ...[]any) (ret [][]map[string]any, err error) {
+func (q *QueryOptions) MultiQuery(queries []string, argsList ...[]any) (ret [][]map[string]any, err error) {
 	if len(argsList) > len(queries) {
 		return nil, fmt.Errorf("dbi: got %d argument sets for %d queries", len(argsList), len(queries))
 	}
@@ -94,8 +94,8 @@ func (q *Query) MultiQuery(queries []string, argsList ...[]any) (ret [][]map[str
 		}
 	}()
 
-	if q.setLocal != nil {
-		for _, s := range q.setLocal.queries() {
+	if q.setConfig != nil {
+		for _, s := range q.setConfig.queries() {
 			_, err := tx.Exec(s.SQL, s.Value)
 			if err != nil {
 				return nil, err

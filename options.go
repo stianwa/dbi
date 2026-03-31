@@ -7,30 +7,37 @@ import (
 	"time"
 )
 
-// Query holds configuration for executing queries.
-type Query struct {
+// QueryOptions holds configuration for executing queries.
+type QueryOptions struct {
 	ctx       context.Context
 	cancel    context.CancelFunc
 	txOptions *sql.TxOptions
-	setLocal  *SetLocal
+	setConfig *SetConfig
 	driver    string
 	db        *sql.DB
 }
 
-// Option configures Query.
-type Option func(q *Query)
+// Option configures QueryOptions.
+type Option func(q *QueryOptions)
 
-// WithSetLocal sets session-local parameters to be applied before
+// Cancel cancels the query context, if set.
+func (q *QueryOptions) Cancel() {
+	if q.cancel != nil {
+		q.cancel()
+	}
+}
+
+// WithSetConfig sets session-local parameters to be applied before
 // executing queries.
-func WithSetLocal(setLocal *SetLocal) Option {
-	return func(q *Query) {
-		q.setLocal = setLocal
+func WithSetConfig(setConfig *SetConfig) Option {
+	return func(q *QueryOptions) {
+		q.setConfig = setConfig
 	}
 }
 
 // WithContext sets the context used for query execution.
 func WithContext(ctx context.Context) Option {
-	return func(q *Query) {
+	return func(q *QueryOptions) {
 		q.ctx = ctx
 	}
 }
@@ -39,7 +46,7 @@ func WithContext(ctx context.Context) Option {
 //
 // If a context is already set, it is used as the parent context.
 func WithTimeout(duration time.Duration) Option {
-	return func(q *Query) {
+	return func(q *QueryOptions) {
 		cause := fmt.Errorf("query timed out after %s", duration)
 
 		parent := q.ctx
@@ -54,26 +61,26 @@ func WithTimeout(duration time.Duration) Option {
 // WithCancelFunc sets a cancel function that is called when query
 // execution finishes.
 func WithCancelFunc(cancel context.CancelFunc) Option {
-	return func(q *Query) {
+	return func(q *QueryOptions) {
 		q.cancel = cancel
 	}
 }
 
 // WithTxOptions sets transaction options for query execution.
 func WithTxOptions(txOpts *sql.TxOptions) Option {
-	return func(q *Query) {
+	return func(q *QueryOptions) {
 		q.txOptions = txOpts
 	}
 }
 
-// NewQuery constructs Query from the provided options
+// NewQueryOptions constructs QueryOptions from the provided options
 // or defaults.
 //
 // If no context is provided, a background context or a timeout
 // context is used, depending on Config defaults. Transaction options
 // are also initialized from Config if not explicitly set.
-func (c *Config) NewQuery(opts ...Option) *Query {
-	q := &Query{}
+func (c *Config) NewQueryOptions(opts ...Option) *QueryOptions {
+	q := &QueryOptions{}
 
 	for _, opt := range opts {
 		opt(q)
